@@ -1,0 +1,716 @@
+---
+title: "Nick Wan's Python Bootcamp in R"
+output:
+  html_document:
+    df_print: paged
+---
+
+This notebook is following along with [Nick Wan's Python Bootcamp](https://www.youtube.com/watch?v=pocp0KdrIdk&ab_channel=NickWan). I will be doing the activities in R.
+
+```{r}
+#load libraries and materials
+library(tidyverse)
+library(caret)
+
+#get working directory path and all files within the directory
+wd <- getwd()
+files <- list.files(path = wd, recursive = TRUE, full.names = TRUE)
+
+#hard coded read in file
+reds_data <- read.csv('/Users/sam/Desktop/personal/NickWanBootcamp/2023-nwbc-reds.csv')
+
+#dynamically read in the same file
+reds_data <- read.csv(files[1])
+
+```
+
+```{r}
+#day 1 
+
+#add a total score column
+reds_data <- reds_data %>%
+  mutate(total_score = home_score + away_score)
+
+#get version of tidyverse currently being used 
+packageVersion('tidyverse')
+
+#get head of df
+reds_data %>%
+  head()
+
+#get summary of df
+str(reds_data)
+
+#get column names
+colnames(reds_data)
+
+#is_strike column
+
+unique(reds_data$description)
+strikes <- c("called_strike","swinging_strike","foul","swinging_strike_blocked",
+             "foul_tip","foul_bunt","missed_bunt","bunt_foul_tip")
+
+#create is strike column and then use indexing to fill in 1 when a strike is called
+reds_data$is_strike <- 0
+reds_data$is_strike[reds_data$description %in% strikes] <- 1
+
+#is_2_strikes column and above 94mph pitch and strikes in the heart of the zone
+reds_data <- reds_data %>%
+  mutate(is_2_strikes = ifelse(strikes == 2,1,0),
+         is_high_velo = ifelse(release_speed > 94,1,0),
+         csw = ifelse((description == 'swinging_strike' | description == 'called_strike') & attack_zone == 'heart',1,0 ))
+
+```
+
+```{r}
+#day 2
+
+#is reds pitcher column
+reds_data <- reds_data %>%
+  mutate(is_reds_pitcher = ifelse((home_team == 'CIN' & inning_topbot == 'Top') |
+                                    (away_team == 'CIN' & inning_topbot == 'Bot'),1,0))
+
+#pivot table avg strikes by pitch type
+reds_pitchers_summary_table_pct <- reds_data %>%
+  filter(is_reds_pitcher == 1) %>%
+  group_by(pitcher_name, pitch_name) %>%
+  summarise(avg_stk_by_pitch = mean(is_strike)) %>%
+  ungroup() %>%
+  rename('avg' = avg_stk_by_pitch)
+
+```
+
+
+```{r}
+#day 3
+
+#adding a count to our pitcher summary table
+reds_pitchers_summary_table <- reds_data %>%
+  filter(is_reds_pitcher == 1) %>%
+  group_by(pitcher_name, pitch_name) %>%
+  summarise(avg_stk_by_pitch = mean(is_strike),
+            count_of_pitches = n()) %>%
+  ungroup()
+
+#doing a summary table for counts and then merging the 2 to make the same summary table using joins
+reds_pitchers_summary_table_cnt <- reds_data %>%
+  filter(is_reds_pitcher == 1) %>%
+  group_by(pitcher_name, pitch_name) %>%
+  summarise(count_of_pitches = n()) %>%
+  ungroup() %>%
+  rename('count' = count_of_pitches)
+
+reds_pitchers_summary_table <- reds_pitchers_summary_table_pct %>%
+  inner_join(reds_pitchers_summary_table_cnt, by = c('pitcher_name','pitch_name'))
+
+reds_pitchers_summary_table %>%
+         filter(pitcher_name == 'Greene, Hunter', pitch_name != '', !is.na(pitch_name))
+
+#hunter greene visualization
+ggplot(data = reds_pitchers_summary_table %>%
+         filter(pitcher_name == 'Greene, Hunter', pitch_name != '', !is.na(pitch_name)),aes(x = pitcher_name, y = avg, fill = pitch_name)) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  coord_flip()
+
+#simple loop for plotting multiple pitcher's arsenals
+pitchers_for_loop <- c('Greene, Hunter','Lodolo, Nick', 'Ashcraft, Graham', 'Gibaut, Ian')
+
+for (i in pitchers_for_loop) {
+  
+  plot <- ggplot(data = reds_pitchers_summary_table %>%
+         filter(pitcher_name == i, pitch_name != '', !is.na(pitch_name)),aes(x = pitcher_name, y = avg, fill = pitch_name)) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  coord_flip()
+  
+  print(plot)
+
+}
+
+#plotting every pitcher
+
+for (i in unique(reds_pitchers_summary_table$pitcher_name)) {
+  
+  plot <- ggplot(data = reds_pitchers_summary_table %>%
+         filter(pitcher_name == i, pitch_name != '', !is.na(pitch_name)),aes(x = pitcher_name, y = avg, fill = pitch_name)) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  coord_flip()
+  
+  print(plot)
+
+}
+
+# #using apply and a function
+# plot_pitcher_arsenal <- function(pitcher_name) {
+#   
+#   plot <- ggplot(data = reds_pitchers_summary_table %>%
+#          filter(pitcher_name == pitcher_name, pitch_name != '', !is.na(pitch_name)),aes(x = pitcher_name, y = avg, fill = pitch_name)) +
+#   geom_bar(stat = 'identity', position = 'dodge') +
+#   coord_flip()
+#   
+#   print(plot)
+# }
+# 
+# lapply(unique(reds_pitchers_summary_table$pitcher_name), plot_pitcher_arsenal)
+
+#summary table of strikes in each attack zone
+reds_data %>%
+  filter(is_reds_pitcher == 1) %>%
+  group_by(attack_zone) %>%
+  summarise(avg_stk = mean(is_strike)) %>%
+  rename(`Attack Zones` = attack_zone)
+
+#summary table of 
+reds_data %>%
+  filter(is_reds_pitcher == 1, release_speed >= 80, release_speed <= 90) %>%
+  group_by(pitcher_name,attack_zone) %>%
+  summarise(avg_stk = mean(is_strike),
+            count = n()) %>%
+  rename(`Attack Zones` = attack_zone)
+
+#pitch types that batters hit for home runs
+pitches_for_hr <- reds_data %>%
+  filter(events == 'home_run') %>%
+  group_by(batter_name, pitch_name) %>%
+  summarise(home_run_cnt = n()) %>%
+  filter(batter_name != '', pitch_name != '') %>%
+  ungroup() %>%
+  arrange(desc(home_run_cnt))
+
+#most frequently thrown pitch type
+freq_pitches <- reds_data %>%
+  group_by(pitcher_name, pitch_name) %>%
+  summarise(pitch_cnt = n()) %>%
+  filter(pitcher_name != '', pitch_name != '', pitch_cnt == max(pitch_cnt)) %>%
+  ungroup() 
+
+all_pitches <- pitches_for_hr %>%
+  merge(freq_pitches, by = c('pitch_name'))
+
+#merge for matchups
+true_matchups <- reds_data %>%
+  select(batter_name, pitcher_name) %>%
+  distinct(batter_name, pitcher_name) %>%
+  mutate(pitcher_batter_matchup = 1)
+
+pitcher_batter_matchup_df <- all_pitches %>%
+  left_join(true_matchups) %>%
+  mutate(pitcher_batter_matchup = case_when(
+    pitcher_batter_matchup == 1 ~ 1,
+    pitcher_batter_matchup == NA ~ 0,
+    TRUE ~ 0))
+
+#scatterplot of avg vs cnt of pitches 
+ggplot(data = reds_pitchers_summary_table %>%
+         filter(pitcher_name == 'Anderson, Chase')) +
+  geom_point(aes(x = avg, y = count, color = pitch_name))
+
+#each reds pitcher best and worst pitches 
+best_and_worst_pitches <- reds_pitchers_summary_table %>%
+  group_by(pitcher_name) %>%
+  mutate(worst_pitch = min(avg),
+         best_pitch = max(avg)) %>%
+  filter(avg == worst_pitch | avg == best_pitch) %>%
+  select(-c(best_pitch,worst_pitch))
+  
+#describe a pitcher using their arsenal - what they do well / what works for them
+nick <- reds_data %>%
+  filter(pitcher_name == 'Lodolo, Nick')
+
+nick_arsenal <- reds_data %>%
+  filter(pitcher_name == 'Lodolo, Nick') %>%
+  group_by(pitcher_name, pitch_name) %>%
+  summarise(pitch_cnt = n()) %>%
+  filter(pitcher_name != '', pitch_name != '') %>%
+  ungroup()
+
+ggplot(data = nick_arsenal, aes(x = reorder(pitch_name,pitch_cnt), y = pitch_cnt, fill = pitch_name)) +
+  geom_bar(stat = 'identity') + 
+  coord_flip()
+
+
+```
+
+
+```{r}
+#day 4
+
+#load in larger csv
+bc_data <- read.csv('/Users/sam/Desktop/personal/NickWanBootcamp/2023-nwbc-data.csv')
+
+#remake strikes column
+strikes <- c("called_strike","swinging_strike","foul","swinging_strike_blocked",
+             "foul_tip","foul_bunt","missed_bunt","bunt_foul_tip")
+
+#create is strike column and then use indexing to fill in 1 when a strike is called
+bc_data$is_strike <- 0
+bc_data$is_strike[bc_data$description %in% strikes] <- 1
+
+#pitch count
+n_pitch_df <- bc_data %>%
+  group_by(pitcher_name,pitch_name) %>%
+  summarise(n_pitches = n())
+
+#merge back total number of pitches to original df as a new column
+bc_data <- bc_data %>%
+  merge(n_pitch_df, by = c('pitcher_name','pitch_name'))
+
+#frequent pitchers limited to >=100 pitches
+frequent_pitchers <- bc_data %>%
+  filter(n_pitches >= 100, !is.na(pitch_name), pitch_name != '', !is.na(pitcher_name), pitcher_name != '' )
+
+#runs scored column
+frequent_pitchers <- frequent_pitchers %>%
+  mutate(runs_scored = post_bat_score - bat_score)
+
+#summary table for each pitchers runs scored and innings played
+era <- frequent_pitchers %>%
+  group_by(pitcher_name, pitcher) %>%
+  summarise(tot_runs_score = sum(runs_scored))
+
+innings_thrown <- frequent_pitchers %>%
+  select(pitcher,game_pk,inning) %>%
+  distinct()
+  
+innings_thrown <- innings_thrown %>%
+  group_by(pitcher) %>%
+  summarise(tot_innings_thrown = n())
+
+era <- era %>%
+  merge(innings_thrown, by = c('pitcher')) %>%
+  mutate(era = (tot_runs_score / tot_innings_thrown)*9)
+
+#strikeouts per 9
+strikeouts <- frequent_pitchers %>%
+  mutate(strikeouts = ifelse(events=='strikeout' | events=='strikeout_double_play',1,0)) %>%
+  select(pitcher,strikeouts) %>%
+  group_by(pitcher) %>%
+  summarise(tot_k = sum(strikeouts))
+
+ks_and_innings <- innings_thrown %>%
+  merge(strikeouts, by= c('pitcher'))
+
+ks_and_innings <- ks_and_innings %>%
+  mutate(ks_per_9 = (tot_k / tot_innings_thrown)*9)
+
+
+
+#fielder independent pitching (FIP) - home_runs, walks, strikeouts
+#FIP = (((13*HR)+(3*BB)-(2*K))/IP) + 3
+pitcher_controlled_events <- frequent_pitchers %>%
+  mutate(strikeouts = ifelse(events=='strikeout' | events=='strikeout_double_play',1,0),
+         hrs = ifelse(events=='home_run',1,0),
+         walks = ifelse(events=='walk',1,0)) %>%
+  select(pitcher,strikeouts,hrs,walks) %>%
+  group_by(pitcher) %>%
+  summarise(tot_k = sum(strikeouts),
+            tot_hrs = sum(hrs),
+            tot_walks = sum(walks))
+
+pitcher_controlled_events_and_innings <- innings_thrown %>%
+  merge(pitcher_controlled_events, by= c('pitcher'))
+
+fip <- pitcher_controlled_events_and_innings %>%
+  mutate(fip = ((((13*tot_hrs)+(3*tot_walks)-(2*tot_k))/tot_innings_thrown) + 3))
+
+stats_df <- era %>%
+  merge(fip, by = c('pitcher','tot_innings_thrown')) %>%
+  merge(ks_and_innings, by = c('pitcher','tot_innings_thrown','tot_k'))
+
+#density plot for ERA and fip correlation
+ggplot(data = stats_df) +
+  geom_density(aes(x = era), color = 'blue', fill = 'lightblue') +
+  geom_density(aes(x = fip), color = 'red', fill = 'salmon1', alpha= 0.5) +
+  scale_x_continuous(name = "Red = FIP, Blue = ERA") +
+  theme_minimal()
+  
+
+```
+
+
+```{r}
+#day 5
+
+#df being used for statistical exploration
+stats_df <- era %>%
+  merge(fip, by = c('pitcher','tot_innings_thrown')) %>%
+  merge(ks_and_innings, by = c('pitcher','tot_innings_thrown','tot_k'))
+
+#quantile and other descriptive features
+str(stats_df)
+
+summary(stats_df)
+
+quantile(stats_df$era,0.5)
+
+median(stats_df$era)
+
+#pearson r correlation matrix 
+cor(stats_df %>% select(era,fip,ks_per_9))
+#r squared 
+cor(stats_df %>% select(era,fip,ks_per_9))**2
+
+#era+ metric - amount above or below the mean era
+stats_df <- stats_df %>%
+  mutate(era_plus = (era / mean(era))*100)
+
+summary(stats_df$era_plus)
+
+ggplot(stats_df) +
+  geom_histogram(aes(x = era))
+
+#pearsonr across 2 columns - get correlation pearson r value and other statistical metrics
+cor_test_result <- cor.test(stats_df$era, stats_df$fip)
+
+#pulling the r squared from the correlation test 
+cor_test_result$estimate
+
+#get p value for correlation test
+cor_test_result$p.value
+
+#squaring this value to get the rsquared 
+cor_test_result$estimate**2
+
+#getting spearmanr values using the same method
+cor.test(stats_df$era, stats_df$fip, method = 'spearman')
+
+#layering histograms
+ggplot(data = stats_df) +
+  geom_histogram(aes(x = era), fill = 'red') +
+  geom_histogram(aes(x = fip), fill = 'blue', alpha = 0.6)
+  
+#ttests 
+ttest <- t.test(stats_df$era, stats_df$fip)
+
+#basic values pulled from ttest
+ttest$statistic
+ttest$p.value
+ttest$conf.int
+
+#updating histogram
+
+ggplot(data = stats_df) +
+  geom_histogram(aes(x = era), fill = 'red') +
+  geom_histogram(aes(x = fip), fill = 'blue', alpha = 0.6) +
+  labs(title = paste('ERA * FIP\nt-value:',round(ttest$statistic,3),'\np-value:',round(ttest$p.value,3)))
+
+#same stats now on scatter plot
+ggplot(data = stats_df) +
+  geom_point(aes(x = era, y = fip), color = 'blue', alpha = 0.6) +
+  labs(title = paste('ERA * FIP\nt-value:',round(cor_test_result$estimate,3),'\np-value:',round(cor_test_result$p.value,3)))
+
+#mse and rmse
+mse <- mean((stats_df$era - stats_df$fip)^2)
+rmse <- mean((stats_df$era - stats_df$fip)^2)**0.5 #raise to 0.5 to get root mean squared error
+
+#scatter plot with line of best fit 
+ggplot(data = stats_df) +
+  geom_point(aes(x = era, y = fip), color = 'blue', alpha = 0.6) +
+  labs(title = paste('ERA * FIP\nt-value:',round(cor_test_result$estimate,3),'\np-value:',round(cor_test_result$p.value,3))) +
+  geom_smooth(method='lm',aes(x = era, y = fip))+
+  labs(title = paste('ERA * FIP\nt-value:',round(ttest$statistic,3),'\np-value:',round(ttest$p.value,3)))
+
+#randomly sample and with set seed
+
+#sample 6 rows
+sample_n(stats_df, size = 6)
+
+#always sample the same 6 rows
+set.seed(1)
+sample_n(stats_df, size = 6)
+
+#create train and test from 2 random samples
+train <- sample_n(stats_df, size = 100)
+test <- sample_n(stats_df, size = 100)
+
+head(train)
+head(test)
+
+#making day 5 into a function
+
+make_corr <- function(df) {
+  
+  cor_test_result <- cor.test(df$era, df$fip)
+
+  #pulling the r squared from the correlation test 
+  cor_test_result$estimate
+  
+  #get p value for correlation test
+  cor_test_result$p.value
+  
+  #squaring this value to get the rsquared 
+  cor_test_result$estimate**2
+  
+  #getting spearmanr values using the same method
+  cor.test(df$era, df$fip, method = 'spearman')
+    
+  #ttests 
+  ttest <- t.test(df$era, df$fip)
+  
+  #basic values pulled from ttest
+  ttest$statistic
+  ttest$p.value
+  ttest$conf.int
+  
+  #mse and rmse
+  mse <- mean((df$era - df$fip)^2)
+  rmse <- mean((df$era - df$fip)^2)**0.5 #raise to 0.5 to get root mean squared error
+  
+  #scatter plot with line of best fit 
+  ggplot(data = df) +
+    geom_point(aes(x = era, y = fip), color = 'blue', alpha = 0.6) +
+    labs(title = paste('ERA * FIP\nt-value:',round(cor_test_result$estimate,3),'\np-value:',round(cor_test_result$p.value,3))) +
+    geom_smooth(method='lm',aes(x = era, y = fip))+
+    labs(title = paste('ERA * FIP\nt-value:',round(ttest$statistic,3),'\np-value:',round(ttest$p.value,3)))
+  
+}
+
+#run function with new datasets
+make_corr(train)
+make_corr(test)
+
+#strikeouts per 9 correlation to era
+cor.test(stats_df$era, stats_df$ks_per_9)
+t.test(stats_df$era, stats_df$ks_per_9)
+
+ggplot(data = stats_df) +
+  geom_point(aes(x = era, y = ks_per_9), color = 'blue', alpha = 0.6) +
+  labs(title = paste('ERA * FIP\nt-value:',round(cor.test(stats_df$era, stats_df$ks_per_9)$estimate,3),'\np-value:',
+                     round(cor.test(stats_df$era, stats_df$ks_per_9)$p.value,3))) +
+  geom_smooth(method='lm',aes(x = era, y = fip))+
+  labs(title = paste('ERA * FIP\nt-value:',round(t.test(stats_df$era, stats_df$ks_per_9)$statistic,3),
+                     '\np-value:',round(t.test(stats_df$era, stats_df$ks_per_9)$p.value,3)))
+
+#wilcox ttest
+t.test(stats_df$era, stats_df$fip, paired = FALSE)
+
+t.test(stats_df$era, stats_df$fip, paired = FALSE)$statistic
+
+#updating function to add what df is being visualized
+make_corr <- function(df) {
+  
+  cor_test_result <- cor.test(df$era, df$fip)
+
+  #pulling the r squared from the correlation test 
+  cor_test_result$estimate
+  
+  #get p value for correlation test
+  cor_test_result$p.value
+  
+  #squaring this value to get the rsquared 
+  cor_test_result$estimate**2
+  
+  #getting spearmanr values using the same method
+  cor.test(df$era, df$fip, method = 'spearman')
+    
+  #ttests 
+  ttest <- t.test(df$era, df$fip)
+  
+  #basic values pulled from ttest
+  ttest$statistic
+  ttest$p.value
+  ttest$conf.int
+  
+  #mse and rmse
+  mse <- mean((df$era - df$fip)^2)
+  rmse <- mean((df$era - df$fip)^2)**0.5 #raise to 0.5 to get root mean squared error
+  
+  df_name <- deparse(substitute(df))
+  
+  #scatter plot with line of best fit 
+  ggplot(data = df) +
+    geom_point(aes(x = era, y = fip), color = 'blue', alpha = 0.6) +
+    labs(title = paste(df_name,'dataset using ERA * FIP\nt-value:',round(cor_test_result$estimate,3),'\np-value:',round(cor_test_result$p.value,3))) +
+    geom_smooth(method='lm',aes(x = era, y = fip))
+  
+}
+
+make_corr(test)
+
+
+```
+
+
+```{r}
+#day 6
+
+#slope intercept regression lines y = mx + b
+# ERA = weight of FIP * FIP + the y value when x = 0 (y intercept)
+
+#predicting ERA(target/response) from other variables(features/explanatory variables)
+
+#basic linear regression model to begin
+target <- 'era'
+features <- c('fip')
+
+model <- lm(formula = era ~ fip, data = stats_df)
+
+#enitre summary of the model
+summary(model)
+
+#y intercept and coefficient for fip (this means when fip is 0, era is 0.85 and every increase of 1 era, there is an increase of 0.77 fip) 
+#this can also be done in slope intercept form for y = mx + b where b is the y intercept and x is fip value and m is the weight (coef) of fip
+model$coefficients
+
+#make a df out of the weights and store y intercept as well
+weights <- as.data.frame(model$coefficients[2])
+colnames(weights) <- names(model$coefficients[2])
+y_int <- c(model$coefficients[1])
+
+#build the slope intercept line using the values from the model into the formula
+col <- 'fip'
+
+stats_df_pred <- stats_df %>%
+  mutate(
+    !!paste0(target, '_pred') :=  get("weights")[[col]] * get("stats_df")[[col]] + y_int)
+
+#can also be done with 
+stats_df_pred <- stats_df %>%
+  mutate(
+    !!paste0(target, '_pred') :=  get("weights")[[col]] * !!sym(col) + y_int)
+
+#scatterplot with predicted values vs actual features -- maintains correlation since only 1 feature is used in the prediction
+ggplot(data = stats_df_pred) +
+  geom_point(aes(x = era, y = fip))
+
+ggplot(data = stats_df_pred) +
+  geom_point(aes(x = era, y = era_pred))
+
+#modeling with more than 1 feature
+target <- 'era'
+features <- c('fip','ks_per_9')
+
+#can define the formula before or in the model building section
+formula_str <- paste(target, "~", paste(features, collapse = " + "))
+
+model <- lm(formula = paste(target, "~", paste(features, collapse = " + ")), data = stats_df)
+
+summary(model)
+
+#save weights from the model in a df
+coef <- as.data.frame(t(coef(model))) %>%
+  rename(intercept = `(Intercept)`)
+
+#add the weights from the model to the original df designating what feature the weight is referencing - this method uses map to create 2 dfs and then join them on the original columns 
+#the final mutate is the same as adding the weights for each variable and then adding the y intercept at the end
+stats_df_pred <- map(features, ~ {
+  col_name <- paste0(.x, "_weights")
+  stats_df %>%
+    mutate(!!col_name := coef(model)[[.x]] * !!sym(.x))
+}) %>%
+  reduce(full_join, by = c(colnames(stats_df))) %>%
+  mutate(!!paste0(target, '_pred') := rowSums(select(.,ends_with("_weights"))) + coef(model)[["(Intercept)"]]) 
+
+#plot to see stronger correlation between era and predicted era
+ggplot(data = stats_df_pred) +
+  geom_point(aes(x = era, y = era_pred))
+
+#get some statistics like rsquared 
+cor_test_result <- cor.test(stats_df_pred[[target]],stats_df_pred[[paste0(target,'_pred')]])
+
+#pulling the r value from the correlation test 
+cor_test_result$estimate
+
+#squaring this value to get the rsquared 
+cor_test_result$estimate**2
+
+#mse and rmse
+mse <- mean((stats_df_pred[[target]] - stats_df_pred[[paste0(target,'_pred')]])^2)
+rmse <- mean((stats_df_pred[[target]] - stats_df_pred[[paste0(target,'_pred')]])^2)**0.5 #raise to 0.5 to get root mean squared error
+
+#using predict over features to return the same math done above
+stats_df_pred <- stats_df_pred %>%
+  mutate(!!paste0(target, '_pred') := predict(model))
+
+#fitting a model using train data and predicting on the test dataset
+model <- lm(formula = paste(target, "~", paste(features, collapse = " + ")), data = train)
+test_pred <- test %>%
+  mutate(!!paste0(target, '_pred') := predict(model, newdata = test))
+
+#plotting test model
+ggplot(data = test_pred) +
+  geom_point(aes(x = era, y = era_pred))
+
+#adding a few more features
+target <- 'era'
+features <- c('fip','ks_per_9','tot_walks','tot_hrs')
+
+#new train and test using new seed and visualize the new sample 
+set.seed(101)
+train <- sample_n(stats_df, 200)
+test <- sample_n(stats_df, 100)
+
+model <- lm(formula = paste(target, "~", paste(features, collapse = " + ")), data = train)
+
+test_pred <- test %>%
+  mutate(!!paste0(target, '_pred') := predict(model, newdata = test))
+
+cor_test_result <- cor.test(test_pred[[target]], test_pred[[paste0(target,'_pred')]])
+r_squared <- cor_test_result$estimate**2
+rmse <- mean((test_pred[[target]] - test_pred[[paste0(target,'_pred')]])^2)**0.5
+
+ggplot(data = test_pred) +
+  geom_point(aes(x = era, y = era_pred)) +
+  geom_smooth(method = 'lm',aes(x = era, y = era_pred) ) +
+  labs(title = paste(' r2:',round(r_squared,3), '\n', 'rmse:', round(rmse,3)))
+
+```
+
+```{r}
+#day 7
+set.seed(7)
+
+#out of sample predictions using train test splits by percent 80/20 split - avoids overfitting by not duplicating samples
+#specify the cross validation method and the amount of folds
+#kfold for cross fold validation - shuffle the data allows random sampling without order being a factor
+ctrl <- trainControl(method = "cv", number = 5, savePredictions = "all")
+
+target <- 'era'
+features <- c('fip','ks_per_9','tot_walks','tot_hrs')
+
+#fit a model using the train function from the caret library
+model <- train(form = as.formula(paste(target, "~", paste(features, collapse = " + "))), data = stats_df, method = "lm", trControl = ctrl)
+
+summary(model)
+
+#loop through multiple folds and save the oos predictions for cv model results
+#averaged results of each fold 
+model$results
+
+#view the results of each fold
+model$resample
+
+model$control
+
+#the index of each fold sample to train 
+model$control$index
+
+#the index of each fold for the test set 
+model$control$indexOut
+
+#the final results of the model
+model$finalModel
+
+#the saved predictions from each fold stored with the actual observation along with the index and what fold the prediction was trained and predicted upon
+model$pred
+
+#save the predictions back to the original df and plot
+stats_df_cv <- model$pred %>%
+  select(pred,obs,rowIndex) %>%
+  rename(!!paste0(target, '_pred') := pred,
+         !!target := obs) %>%
+  left_join(stats_df %>%
+          mutate(rowIndex = as.numeric(rownames(.))), by = c("rowIndex" = "rowIndex", "era" = "era")) %>%
+  arrange(rowIndex) %>%
+  select(-c(rowIndex))
+
+#plot the predicted values from the cv model against the actual observed values
+rmse <- model$results$RMSE
+r_squared <- model$results$Rsquared
+
+ggplot(data = stats_df_cv) +
+  geom_point(aes(x = era, y = era_pred)) +
+  geom_smooth(method = 'lm',aes(x = era, y = era_pred) ) +
+  labs(title = paste(' r2:',round(r_squared,3), '\n', 'rmse:', round(rmse,3)))
+
+```
+
